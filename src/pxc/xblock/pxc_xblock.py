@@ -15,6 +15,7 @@ from web_fragments.fragment import Fragment
 from webob import Response
 from xblock.core import XBlock
 from xblock.fields import Scope, String
+from xblock.validation import Validation
 
 from pxc.lib.actions import ActionValidationError
 from pxc.lib.capabilities import CapabilityError
@@ -146,6 +147,14 @@ class PxcXBlock(XBlock):  # type: ignore[misc]
             permission=permission,
             storage_base_url=self.runtime.handler_url(self, "storage").strip("?"),
         )
+
+    def validate(self) -> Validation:
+        # Open edX's LmsBlockMixin.validate() calls resources.files('pxc') to
+        # find translations, which crashes because 'pxc' is a namespace package
+        # shared between pxc-lib and pxc-xblock. Skip to XBlock.validate() to
+        # avoid the broken i18n service path; PXC has no validation requirements
+        # that need translation-aware messages.
+        return XBlock.validate(self)
 
     # ------------------------------------------------------------------ #
     # Views
