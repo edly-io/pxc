@@ -31,7 +31,7 @@ Each sub-project under `src/pxc/` has its own `pyproject.toml` and can be instal
 Make sure to install the following requirements:
 
 - Python 3.11+
-- [jco](https://github.com/bytecodealliance/jco): for building JS plugins to WebAssembly components (`npm install -g @anthropic-ai/jco` or use via `npx jco`)
+- [jco](https://bytecodealliance.github.io/jco/): for building JS plugins to WebAssembly components. See the official documentation for installation instructions.
 
 Then install the project with:
 
