@@ -2,8 +2,13 @@
 
 import json
 
+import pytest
+
 from pxc.lib.permission import Permission
+from pxc.lib.sandbox import SandboxRuntimeError
 from pxc.lib.tests.samples.conftest import make_runtime
+
+CONTEXT = {"activity-id": "a1", "course-id": "c1", "user-id": "u1"}
 
 
 def test_get_state_defaults() -> None:
@@ -85,3 +90,18 @@ def test_play_state_hides_correct_answers() -> None:
     state = rt.get_state()
     # In play mode, correct_answers should be hidden
     assert "correct_answers" not in state
+
+
+def test_a_throwing_call_carries_its_stderr_and_writes_none_to_the_process(
+    capfd: pytest.CaptureFixture[str],
+) -> None:
+    rt = make_runtime("mcq")
+    assert rt.sandbox is not None
+
+    with pytest.raises(SandboxRuntimeError) as raised:
+        rt.sandbox.call_function(
+            "on-action", "answer.submit", "not json", CONTEXT, "play"
+        )
+
+    assert "JSON.parse" in raised.value.stderr
+    assert "JSON.parse" not in capfd.readouterr().err

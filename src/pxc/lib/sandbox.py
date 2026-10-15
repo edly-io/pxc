@@ -1,3 +1,4 @@
+import codecs
 import logging
 from pathlib import Path
 from typing import Any, Callable
@@ -11,7 +12,30 @@ logger = logging.getLogger(__file__)
 class SandboxRuntimeError(RuntimeError):
     """
     Raised whenever there is an error in a sandbox executor at runtime.
+
+    ``stderr`` holds what the sandbox wrote to stderr during the failing call, or "" if nothing.
+    When it is not empty, it is also appended to the error message, so logging the error shows it.
     """
+
+    def __init__(self, message: str, stderr: str = "") -> None:
+        super().__init__(f"{message}\nSandbox stderr:\n{stderr}" if stderr else message)
+        self.stderr = stderr
+
+
+def stderr_collector(chunks: list[str]) -> Callable[[bytes], int]:
+    """
+    Return a callback that decodes sandbox stderr output and appends it to ``chunks``.
+
+    The decoder is incremental, so a multi-byte character split across two writes is
+    not garbled; invalid bytes are replaced.
+    """
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+
+    def collect(data: bytes) -> int:
+        chunks.append(decoder.decode(data))
+        return len(data)
+
+    return collect
 
 
 class ForbiddenImportError(ValueError):
@@ -70,17 +94,19 @@ class SandboxComponentExecutor(SandboxExecutor):
         self._host_functions = host_functions
 
     def _create_store_instance(
-        self,
+        self, stderr: list[str]
     ) -> tuple[wasmtime.Store, wasmtime.component.Instance]:
         """
         Create a wasmtime store, engine with wasi features, component, etc.
+
+        What the sandbox writes to stderr is appended to ``stderr`` as text and not forwarded anywhere.
         """
         engine = create_engine()
 
         # Create WASI config
         wasi_config = wasmtime.WasiConfig()
         wasi_config.inherit_stdout()
-        wasi_config.inherit_stderr()
+        wasi_config.stderr_custom = stderr_collector(stderr)
 
         # Create store
         store = wasmtime.Store(engine)
@@ -109,9 +135,13 @@ class SandboxComponentExecutor(SandboxExecutor):
     def call_function(self, function_name: str, *args: Any) -> bytes:
         """
         Call an exported function on the WASM component.
+
+        A SandboxRuntimeError raised while running the function carries what the sandbox wrote
+        to stderr.
         """
+        stderr: list[str] = []
         try:
-            store, instance = self._create_store_instance()
+            store, instance = self._create_store_instance(stderr)
         except wasmtime.WasmtimeError as e:
             raise SandboxRuntimeError(
                 f"Component {self._plugin_path}: failed to create instance"
@@ -125,11 +155,13 @@ class SandboxComponentExecutor(SandboxExecutor):
             result = call_sandbox_function(store, func, *args)
         except wasmtime.WasmtimeError as e:
             raise SandboxRuntimeError(
-                f"Component {self._plugin_path}: error running '{function_name}' with arguments: {args}"
+                f"Component {self._plugin_path}: error running '{function_name}' with arguments: {args}",
+                "".join(stderr),
             ) from e
         except Exception as e:
             raise SandboxRuntimeError(
-                f"Component {self._plugin_path}: error running '{function_name}'"
+                f"Component {self._plugin_path}: error running '{function_name}'",
+                "".join(stderr),
             ) from e
         return result.encode("utf-8") if isinstance(result, str) else b""
 
